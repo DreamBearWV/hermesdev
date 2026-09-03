@@ -1,0 +1,18 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches: [ "main" ]  # 當推送到 main 分支時觸發
+
+jobs:
+  deploy:
+    runs-on: self-hosted   # <--- 寫在這裡！告訴 GitHub 使用你的樹莓派 Runner
+
+    steps:
+      - name: 下載程式碼
+        uses: actions/checkout@v4
+
+      - name: 執行部署測試
+        run: |
+          echo "正在樹莓派上執行部署..."
+          python3 --version
