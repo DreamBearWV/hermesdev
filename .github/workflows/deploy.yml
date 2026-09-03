@@ -1,18 +1,20 @@
-name: Deploy to Raspberry Pi
+name: Deploy to Raspberry Pi 5
 
 on:
   push:
-    branches: [ "main" ]  # 當推送到 main 分支時觸發
+    branches: [ "main" ]
 
 jobs:
   deploy:
-    runs-on: self-hosted   # <--- 寫在這裡！告訴 GitHub 使用你的樹莓派 Runner
+    runs-on: self-hosted
 
     steps:
-      - name: 下載程式碼
+      - name: 拉取最新程式碼
         uses: actions/checkout@v4
 
-      - name: 執行部署測試
+      - name: 打包並重啟 Docker 服務
         run: |
-          echo "正在樹莓派上執行部署..."
-          python3 --version
+          docker build -t pi-cloud-app .
+          docker stop pi-app-container || true
+          docker rm pi-app-container || true
+          docker run -d --name pi-app-container -p 8000:8000 pi-cloud-app
