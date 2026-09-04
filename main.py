@@ -1,37 +1,74 @@
-import os
+# main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from openai import OpenAI
+from contextlib import asynccontextmanager
+from memory_db import (
+    init_db, 
+    get_core_memory, 
+    archival_collection,
+    get_recent_recall_memory
+)
+from agent_loop import run_agent_turn
 
-app = FastAPI(title="Hermes Agent on Pi 5")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 容器啟動時自動初始化 SQLite 與 ChromaDB 表格
+    init_db()
+    print("🚀 Hermes Agent MemGPT 記憶系統初始化完畢！")
+    yield
 
-# 讀取 MiniMax API 設定（由 GitHub Secrets 注入 Docker 環境變數）
-def get_minimax_client():
-    api_key = os.getenv("MINIMAX_API_KEY")
-    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
-    if not api_key:
-        raise ValueError("尚未設定 MINIMAX_API_KEY 環境變數")
-    return OpenAI(api_key=api_key, base_url=base_url)
+app = FastAPI(
+    title="Hermes Agent on Pi 5",
+    description="具備 MemGPT 分層記憶與動態 Tool Call 機制的 AI Agent",
+    lifespan=lifespan
+)
 
 class ChatRequest(BaseModel):
     prompt: str
 
 @app.get("/")
 def read_root():
+    """保留原版根目錄狀態回應"""
     return {"status": "online", "agent": "Hermes-Pi5", "message": "Hermes Agent 服務運行中"}
 
 @app.post("/chat")
 def chat_with_agent(req: ChatRequest):
+    """主對話介面：觸發 MemGPT 雙輪次控制迴圈 (包含記憶自動更新)"""
     try:
-        client = get_minimax_client()
-        response = client.chat.completions.create(# 關鍵修改：改用 OpenRouter 的 MiniMax 免費模型名稱
-            model="minimax/minimax-m3:free",
-            messages=[
-                {"role": "system", "content": "你是運行在樹莓派 5 上的 Hermes Agent 助手。"},
-                {"role": "user", "content": req.prompt}
-            ]
-        )
-        reply = response.choices[0].message.content
+        reply = run_agent_turn(req.prompt)
         return {"prompt": req.prompt, "response": reply}
+    except Exception as e:
+        print(f"❌ Chat Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 記憶體檢視與除錯 Endpoints ---
+
+@app.get("/memory/core")
+def inspect_core_memory():
+    """即時檢視 SQLite Core Memory (Persona & Human)"""
+    return {
+        "status": "success",
+        "core_memory": get_core_memory()
+    }
+
+@app.get("/memory/recall")
+def inspect_recall_memory(limit: int = 10):
+    """即時檢視 SQLite 對話歷史 (預設最新 10 條)"""
+    return {
+        "status": "success",
+        "recall_memory": get_recent_recall_memory(limit=limit)
+    }
+
+@app.get("/memory/archival")
+def inspect_archival_memory():
+    """即時檢視 ChromaDB 向量庫中的長效知識與 Topic"""
+    try:
+        data = archival_collection.get()
+        return {
+            "status": "success",
+            "total_items": len(data.get("ids", [])),
+            "documents": data.get("documents", []),
+            "metadatas": data.get("metadatas", [])
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

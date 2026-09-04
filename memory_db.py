@@ -2,7 +2,7 @@
 import sqlite3
 import uuid
 import chromadb
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 DB_PATH = "hermes_memory.db"
 CHROMA_PATH = "./chroma_db"
@@ -75,6 +75,33 @@ def update_core_memory(section: str, content: str):
     conn.close()
 
 
+# --- Recall Memory 操作介面 (支援 LIMIT 10) ---
+def get_recent_recall_memory(limit: int = 10) -> List[Dict[str, str]]:
+    """從 SQLite 僅讀取最新 N 條對話歷史 (預設 10 條，按時間順序排列)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT role, content FROM recall_memory ORDER BY id DESC LIMIT ?",
+        (limit,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    # 反轉以保持時間序列 (Chronological Order)
+    return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+
+
+def save_recall_memory(role: str, content: str):
+    """將對話紀錄寫入 SQLite"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO recall_memory (role, content) VALUES (?, ?)",
+        (role, content)
+    )
+    conn.commit()
+    conn.close()
+
+
 # --- Archival Memory (ChromaDB 向量) 操作介面 ---
 def insert_archival_memory(content: str, topic: str = "general"):
     """將長效記憶轉換為向量文字塊並存入 ChromaDB"""
@@ -84,10 +111,13 @@ def insert_archival_memory(content: str, topic: str = "general"):
     )
 
 
-def search_archival_memory(query: str, n_results: int = 3) -> List[str]:
-    """使用語意相似度檢索 Archival Memory"""
+def search_archival_memory(query: str, topic: Optional[str] = None, n_results: int = 3) -> List[str]:
+    """使用語意相似度檢索 Archival Memory (支援 Topic 標籤過濾)"""
+    where_filter = {"topic": topic} if topic else None
     results = archival_collection.query(
-        query_texts=[query], n_results=n_results
+        query_texts=[query],
+        n_results=n_results,
+        where=where_filter
     )
     if results and results.get("documents") and results["documents"]:
         return results["documents"][0]

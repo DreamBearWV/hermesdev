@@ -1,7 +1,7 @@
-fastapi
-uvicorn
+fastapi>=0.100.0
+uvicorn>=0.22.0
 openai>=1.0.0
 python-dotenv
 pydantic
 requests
-chromadb
+chromadb>=0.4.0
