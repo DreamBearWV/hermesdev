@@ -1,0 +1,4 @@
+agent:
+  name: "Hermes-Pi5"
+  version: "1.0.0"
+  system_prompt: "You are an autonomous agent running on Raspberry Pi 5."
