@@ -19,15 +19,22 @@ jobs:
           docker rm -f pi-app-container || true
           docker image prune -f
 
-      - name: 啟動 Docker 容器 (帶入 OpenRouter / MiniMax API Key)
+      - name: 啟動 Docker 容器 (帶入 API Key 與記憶庫 Volume 持久化)
         env:
           MINIMAX_KEY: ${{ secrets.MINIMAX_API_KEY }}
           MINIMAX_URL: ${{ secrets.MINIMAX_BASE_URL }}
         run: |
+          # 1. 於樹莓派宿主機建立記憶庫資料夾與檔案（避免被 Docker 誤當作資料夾建立）
+          mkdir -p $HOME/hermes_data/chroma_db
+          touch $HOME/hermes_data/hermes_memory.db
+
+          # 2. 啟動 Docker 容器並掛載持久化檔案
           docker run -d \
             --restart always \
             --name pi-app-container \
             -p 8000:8000 \
             -e MINIMAX_API_KEY="${MINIMAX_KEY}" \
             -e MINIMAX_BASE_URL="${MINIMAX_URL}" \
+            -v $HOME/hermes_data/hermes_memory.db:/app/hermes_memory.db \
+            -v $HOME/hermes_data/chroma_db:/app/chroma_db \
             pi-cloud-app

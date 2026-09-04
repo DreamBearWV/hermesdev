@@ -2,12 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 1. 安裝系統基本工具（如 curl、git，以備 Agent 擴充技能時使用）
+# 1. 安裝基本工具與 ChromaDB 所需的 C++ 編譯環境 (ARM64 支援)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git \
-    && rm -rf /var/lib/apt-get/lists/*
+    curl \
+    git \
+    build-essential \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. 安裝 Python 依賴套件（包含 fastapi, uvicorn, openai 等）
+# 2. 安裝 Python 依賴套件（包含 fastapi, uvicorn, openai, chromadb 等）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
