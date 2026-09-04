@@ -1,5 +1,5 @@
-name: Deploy to Raspberry Pi 5
- 
+name: Deploy Hermes Agent to Raspberry Pi 5
+
 on:
   push:
     branches: [ "main" ]
@@ -12,9 +12,22 @@ jobs:
       - name: 拉取最新程式碼
         uses: actions/checkout@v4
 
-      - name: 打包並重啟 Docker 服務
+      - name: 打包 Docker 鏡像與清理舊環境
         run: |
           docker build -t pi-cloud-app .
           docker stop pi-app-container || true
-          docker rm pi-app-container || true
-          docker run -d --name pi-app-container -p 8000:8000 pi-cloud-app
+          docker rm -f pi-app-container || true
+          docker image prune -f
+
+      - name: 啟動 Docker 容器 (帶入 OpenRouter / MiniMax API Key)
+        env:
+          MINIMAX_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          MINIMAX_URL: ${{ secrets.MINIMAX_BASE_URL }}
+        run: |
+          docker run -d \
+            --restart always \
+            --name pi-app-container \
+            -p 8000:8000 \
+            -e MINIMAX_API_KEY="${MINIMAX_KEY}" \
+            -e MINIMAX_BASE_URL="${MINIMAX_URL}" \
+            pi-cloud-app
