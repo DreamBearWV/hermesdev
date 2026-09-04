@@ -10,15 +10,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 安裝 Python 依賴套件（包含 fastapi, uvicorn, openai, chromadb 等）
+# 2. 安裝 Python 依賴套件（包含 fastapi, uvicorn, openai, chromadb, python-telegram-bot 等）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 3. 複製專案原始碼
 COPY . .
 
-# 4. 開放 API 埠號
+# 4. 給予啟動腳本執行權限
+RUN chmod +x /app/start.sh
+
+# 5. 開放 API 埠號
 EXPOSE 8000
 
-# 5. 啟動 FastAPI / Uvicorn 服務
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. 改由 start.sh 同時啟動 FastAPI 與 Telegram Bot
+CMD ["/app/start.sh"]
