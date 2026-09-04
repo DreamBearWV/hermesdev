@@ -13,14 +13,14 @@ from memory_db import (
 )
 from memgpt_tools import MEMGPT_TOOLS
 
-# 初始化 OpenRouter 客戶端
+# 初始化 OpenRouter / MiniMax 客戶端
 client = OpenAI(
     api_key=os.getenv("MINIMAX_API_KEY"),
     base_url=os.getenv("MINIMAX_BASE_URL", "https://openrouter.ai/api/v1")
 )
 
 def get_recent_recall_memory(limit: int = 10) -> List[Dict[str, str]]:
-    """從 SQLite 讀取最新 10 條對話紀錄（保持時間順序）"""
+    """從 SQLite 讀取最新 N 條對話紀錄（保持時間順序）"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -45,12 +45,12 @@ def save_recall_memory(role: str, content: str):
     conn.close()
 
 def build_system_prompt() -> str:
-    """根據當前 SQLite 中的 Core Memory 動態組裝 System Prompt"""
+    """根據當前 SQLite 中的 Core Memory 動態組裝 System Prompt，並加入強效行為護欄"""
     core = get_core_memory()
-    persona = core.get("persona", "我是 Hermes Agent。")
+    persona = core.get("persona", "我是 Hermes Agent，運行在樹莓派 5 上的 AI 助理。")
     human = core.get("human", "使用者資訊未知。")
     
-    return f"""你是 Hermes Agent，運行在樹莓派 5 上的 AI 助理。
+    return f"""你是 Hermes Agent，運行在樹莓派 5 (ARM64) Docker 容器內的自主 AI 助理。
 
 [CORE MEMORY - PERSONA]
 {persona}
@@ -58,29 +58,30 @@ def build_system_prompt() -> str:
 [CORE MEMORY - HUMAN (使用者資訊與習慣)]
 {human}
 
-【記憶修改指南】：
-1. 若得知使用者的資訊變更（如名稱、偏好、硬體配置），你必須呼叫 `core_memory_replace` 或 `core_memory_append`。
-2. 若有長篇技術細節或未來需備查的資訊，請呼叫 `archival_memory_insert` 並帶上合適的 topic 標籤。
-3. 若需要回想或查詢過去的檔案，請呼叫 `archival_memory_search`。
+【嚴格記憶與工具呼叫規則】：
+1. 當使用者提及任何個人資訊、習慣、偏好、生日、姓名或要求你「記住/更新/修改」記憶時，你【必須】發起 `core_memory_append` 或 `core_memory_replace` 工具呼叫。
+2. 絕對禁止在沒有產生 Tool Call 的情況下口頭宣稱「已記錄」、「好的我記住了」。沒有觸發工具就等於沒有寫入資料庫！
+3. 若有長篇技術細節或未來需備查的資訊，請呼叫 `archival_memory_insert` 並帶上合適的 topic 標籤。
+4. 若需要回想或查詢過去的檔案或備註，請呼叫 `archival_memory_search`。
 """
 
 def run_agent_turn(user_input: str) -> str:
     """執行標準雙輪次 Agent 迴圈"""
-    # 1. 讀取 Core Memory 並建立提示詞
+    # 1. 讀取最新 Core Memory 並建立動態 Prompt
     system_prompt = build_system_prompt()
     
     # 2. 讀取最新 10 條歷史紀錄 (LIMIT 10)
     history = get_recent_recall_memory(limit=10)
     
-    # 3. 組合完整 Message List
+    # 3. 組合 Message List
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_input})
     
-    # 先將使用者輸入寫入 Recall Memory
+    # 寫入使用者輸入至 Recall Memory
     save_recall_memory("user", user_input)
     
-    # 第一輪 API 呼叫：讓模型決定回覆或調用工具
+    # 4. 第一輪 API 呼叫：讓模型決定回覆或調用工具
     response = client.chat.completions.create(
         model="minimax/minimax-m3:free",
         messages=messages,
@@ -90,49 +91,57 @@ def run_agent_turn(user_input: str) -> str:
     
     response_msg = response.choices[0].message
     
-    # 判斷是否需要執行 Tool Call
+    # 5. 判斷是否觸發 Tool Call
     if response_msg.tool_calls:
-        messages.append(response_msg)  # 帶入模型發起的 Tool Calls 紀錄
+        # 將模型的 Tool Call 請求訊息加回歷史隊列（OpenAI 標準格式）
+        messages.append(response_msg)
         
         for tool_call in response_msg.tool_calls:
             func_name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
             execution_result = ""
             
-            # 執行本地資料庫變更
+            # 執行對應的本地記憶庫操作
             if func_name == "core_memory_replace":
                 section = args.get("section", "human")
                 new_content = args.get("new_content", "")
                 update_core_memory(section, new_content)
-                execution_result = f"Core memory block '{section}' updated."
+                execution_result = f"Successfully replaced core memory section '{section}'."
                 
             elif func_name == "core_memory_append":
                 section = args.get("section", "human")
                 text = args.get("text_to_append", "")
                 current_core = get_core_memory()
                 old_text = current_core.get(section, "")
-                update_core_memory(section, f"{old_text} {text}".strip())
-                execution_result = f"Appended text to core memory block '{section}'."
+                
+                # 自動避免重複追加相同字串
+                if text in old_text:
+                    updated_text = old_text
+                else:
+                    updated_text = f"{old_text} {text}".strip()
+                    
+                update_core_memory(section, updated_text)
+                execution_result = f"Successfully appended text to core memory section '{section}'."
                 
             elif func_name == "archival_memory_insert":
                 content = args.get("content", "")
                 topic = args.get("topic", "general")
                 insert_archival_memory(content=content, topic=topic)
-                execution_result = f"Content archived under topic '{topic}'."
+                execution_result = f"Content successfully archived under topic '{topic}'."
                 
             elif func_name == "archival_memory_search":
                 query = args.get("query", "")
                 docs = search_archival_memory(query=query)
                 execution_result = f"Archival search results: {json.dumps(docs, ensure_ascii=False)}"
             
-            # 將工具執行結果作為 tool 角色加回對話隊列
+            # 將工具執行結果作為 tool 角色回應模型
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": execution_result
             })
         
-        # 第二輪 API 呼叫：讓模型根據工具執行結果產生最終自然語言回覆
+        # 6. 第二輪 API 呼叫：讓模型根據工具執行結果產生最終自然語言回覆
         second_response = client.chat.completions.create(
             model="minimax/minimax-m3:free",
             messages=messages
@@ -141,6 +150,6 @@ def run_agent_turn(user_input: str) -> str:
     else:
         final_reply = response_msg.content or ""
 
-    # 將 Agent 最終回覆寫入 Recall Memory
+    # 7. 將 Agent 的最終回覆寫入 Recall Memory
     save_recall_memory("assistant", final_reply)
     return final_reply
