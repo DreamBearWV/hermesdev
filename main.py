@@ -24,8 +24,8 @@ def read_root():
 def chat_with_agent(req: ChatRequest):
     try:
         client = get_minimax_client()
-        response = client.chat.completions.create(
-            model="abab6.5s-chat",
+        response = client.chat.completions.create(# 關鍵修改：改用 OpenRouter 的 MiniMax 免費模型名稱
+            model="minimax/minimax-m3:free",
             messages=[
                 {"role": "system", "content": "你是運行在樹莓派 5 上的 Hermes Agent 助手。"},
                 {"role": "user", "content": req.prompt}
