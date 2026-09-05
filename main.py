@@ -1,4 +1,6 @@
 # main.py
+import os
+import subprocess
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -10,16 +12,55 @@ from memory_db import (
 )
 from agent_loop import run_agent_turn
 
+# --- 系統診斷輔助工具 ---
+
+def get_system_status_data():
+    """讀取樹莓派系統進程與 Docker 狀態"""
+    status_report = {}
+    
+    # 1. 讀取 RAM 與 CPU 佔用最高的前 10 個進程
+    try:
+        ps_output = subprocess.check_output(
+            "ps aux --sort=-%mem | head -n 11", 
+            shell=True, 
+            text=True
+        )
+        status_report["top_memory_processes"] = ps_output.strip()
+    except Exception as e:
+        status_report["top_memory_processes"] = f"無法讀取進程: {str(e)}"
+
+    # 2. 讀取 Docker 容器狀態 (透過掛載的 docker.sock)
+    try:
+        docker_output = subprocess.check_output(
+            "curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json?all=1", 
+            shell=True, 
+            text=True
+        )
+        status_report["docker_containers_raw"] = docker_output.strip()
+    except Exception as e:
+        status_report["docker_containers_raw"] = f"無法讀取 Docker Socket: {str(e)}"
+
+    # 3. 讀取系統記憶體與硬碟使用率
+    try:
+        df_output = subprocess.check_output("df -h /", shell=True, text=True)
+        free_output = subprocess.check_output("free -h", shell=True, text=True)
+        status_report["disk_usage"] = df_output.strip()
+        status_report["memory_usage"] = free_output.strip()
+    except Exception as e:
+        status_report["hardware_metrics"] = f"無法讀取硬體指標: {str(e)}"
+
+    return status_report
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 容器啟動時自動初始化 SQLite 與 ChromaDB 表格
     init_db()
-    print("🚀 Hermes Agent MemGPT 記憶系統初始化完畢！")
+    print("🚀 Hermes Agent MemGPT 記憶系統與系統診斷模組初始化完畢！")
     yield
 
 app = FastAPI(
     title="Hermes Agent on Pi 5",
-    description="具備 MemGPT 分層記憶與動態 Tool Call 機制的 AI Agent",
+    description="具備 MemGPT 分層記憶、系統進程診斷與動態 Tool Call 機制的 AI Agent",
     lifespan=lifespan
 )
 
@@ -40,6 +81,16 @@ def chat_with_agent(req: ChatRequest):
     except Exception as e:
         print(f"❌ Chat Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- 系統診斷 Endpoints ---
+
+@app.get("/system/status")
+def inspect_system_status():
+    """即時檢視樹莓派系統資源與 Docker 容器現況"""
+    return {
+        "status": "success",
+        "system_data": get_system_status_data()
+    }
 
 # --- 記憶體檢視與除錯 Endpoints ---
 

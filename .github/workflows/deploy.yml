@@ -19,18 +19,18 @@ jobs:
           docker rm -f pi-app-container || true
           docker image prune -f
 
-      - name: 啟動 Docker 容器 (帶入 API Key、Telegram 設定與記憶庫 Volume 持久化)
+      - name: 啟動 Docker 容器 (帶入 API Key、Telegram 設定、記憶庫 Volume 與系統診斷掛載)
         env:
           MINIMAX_KEY: ${{ secrets.MINIMAX_API_KEY }}
           MINIMAX_URL: ${{ secrets.MINIMAX_BASE_URL }}
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_USER_ID: ${{ secrets.ALLOWED_TELEGRAM_USER_ID }}
         run: |
-          # 1. 於樹莓派宿主機建立記憶庫資料夾與檔案（避免被 Docker 誤當作資料夾建立）
+          # 1. 於樹莓派宿主機建立記憶庫資料夾與檔案
           mkdir -p $HOME/hermes_data/chroma_db
           touch $HOME/hermes_data/hermes_memory.db
 
-          # 2. 啟動 Docker 容器並掛載持久化檔案與環境變數
+          # 2. 啟動 Docker 容器並掛載持久化檔案、環境變數與系統檢視 Socket
           docker run -d \
             --restart always \
             --name pi-app-container \
@@ -41,4 +41,6 @@ jobs:
             -e ALLOWED_TELEGRAM_USER_ID="${TG_USER_ID}" \
             -v $HOME/hermes_data/hermes_memory.db:/app/hermes_memory.db \
             -v $HOME/hermes_data/chroma_db:/app/chroma_db \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            -v /proc:/host/proc:ro \
             pi-cloud-app
