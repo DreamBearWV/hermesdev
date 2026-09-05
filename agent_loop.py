@@ -12,8 +12,7 @@ from memory_db import (
     search_archival_memory
 )
 from memgpt_tools import MEMGPT_TOOLS
-# 匯入 main.py 中的系統狀態讀取函式
-from main import get_system_status_data
+from system_tools import get_system_status_data
 
 # 初始化 OpenRouter / MiniMax 客戶端
 client = OpenAI(
